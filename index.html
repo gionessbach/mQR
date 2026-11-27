@@ -55,6 +55,7 @@ button:disabled{opacity:.4}
 <div class="hint" id="hint">Tippe auf „Kamera starten“ und halte den QR-Code ins Bild.</div>
 </div>
 <div class="msg" id="msg"></div>
+<div class="row" id="zr" hidden><input type="range" id="zm" style="width:100%" aria-label="Zoom"></div>
 <div class="row">
 <button id="go">Kamera starten</button>
 <button class="sec" id="pick">Foto wählen</button>
@@ -10204,35 +10205,47 @@ function found(t){
   var n=Date.now();if(t===last&&n-lastT<3000)return;last=t;lastT=n;
   show(t);add(t);msg.textContent='QR-Code gelesen.';
 }
-function decodeCanvas(max){
+function decodeCanvas(fast){
   var d=cx.getImageData(0,0,cv.width,cv.height);
-  var r=jsQR(d.data,d.width,d.height,{inversionAttempts:'attemptBoth'});
+  var r=jsQR(d.data,d.width,d.height,{inversionAttempts:fast?'dontInvert':'attemptBoth'});
   return r&&r.data?r.data:null;
 }
 function loop(){
   if(!running)return;
   if(document.hidden||vid.readyState<2){setTimeout(loop,200);return}
-  var done=function(t){if(t)found(t);setTimeout(loop,110)};
+  var done=function(t){if(t)found(t);setTimeout(loop,50)};
   if(det){
     det.detect(vid).then(function(r){done(r&&r[0]?r[0].rawValue:null)},function(){det=null;done(null)});
   }else{
-    var w=vid.videoWidth,h=vid.videoHeight,s=Math.min(1,640/Math.max(w,h));
+    var w=vid.videoWidth,h=vid.videoHeight,s=Math.min(1,800/Math.max(w,h));
     cv.width=Math.round(w*s);cv.height=Math.round(h*s);cx.drawImage(vid,0,0,cv.width,cv.height);
-    done(decodeCanvas());
+    done(decodeCanvas(true));
   }
 }
 function stop(){
   running=false;if(stream){stream.getTracks().forEach(function(t){t.stop()});stream=null}
-  vid.srcObject=null;view.classList.remove('on');go.textContent='Kamera starten';
+  vid.srcObject=null;view.classList.remove('on');$('zr').hidden=true;go.textContent='Kamera starten';
+}
+function tune(){
+  try{
+    var t=stream.getVideoTracks()[0],c=t.getCapabilities?t.getCapabilities():{},adv=[];
+    if(c.focusMode&&c.focusMode.indexOf('continuous')>-1)adv.push({focusMode:'continuous'});
+    if(adv.length)t.applyConstraints({advanced:adv}).catch(function(){});
+    if(c.zoom){
+      var z=$('zm');z.min=c.zoom.min;z.max=c.zoom.max;z.step=c.zoom.step||0.1;z.value=c.zoom.min;
+      z.oninput=function(){t.applyConstraints({advanced:[{zoom:parseFloat(z.value)}]}).catch(function(){})};
+      $('zr').hidden=false;
+    }
+  }catch(e){}
 }
 go.onclick=function(){
   if(running){stop();return}
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){msg.textContent='Die Kamera ist hier nicht verfügbar. Nutze „Foto wählen“.';return}
   msg.textContent='Kamera wird gestartet …';
-  navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false}).then(function(s){
+  navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false}).then(function(s){
     stream=s;vid.srcObject=s;return vid.play()
   }).then(function(){
-    running=true;view.classList.add('on');go.textContent='Kamera stoppen';msg.textContent='Suche QR-Code …';loop();
+    running=true;view.classList.add('on');go.textContent='Kamera stoppen';msg.textContent='Suche QR-Code … Halte das Handy eine Handbreit entfernt.';tune();loop();
   }).catch(function(){
     stop();msg.textContent='Kein Kamerazugriff. Erlaube die Kamera oder nutze „Foto wählen“.';
   });
